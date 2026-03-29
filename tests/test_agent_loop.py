@@ -119,3 +119,55 @@ def test_history_not_truncated_when_under_limit():
     agent.ask("q2")
 
     assert len(agent.history) == 4  # 2 questions + 2 answers, under limit
+
+
+def test_summarize_and_truncate_inserts_summary():
+    # max_history_turns=2 → max_messages=4
+    # After 3 asks: 6 messages > 4 → summarization triggers
+    agent = AgentLoop(
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        store=MagicMock(),
+        repo_root="/repo",
+        max_history_turns=2,
+    )
+    mock_msg_response = MagicMock()
+    mock_msg_response.content = [MagicMock(text="- Asked about auth\n- Found validate_token in auth.py")]
+    agent.llm.client.messages.create.return_value = mock_msg_response
+    agent.llm.respond.return_value = "answer"
+
+    agent.ask("q0")
+    agent.ask("q1")
+    agent.ask("q2")  # triggers summarization
+
+    assert agent.history[0]["role"] == "user"
+    assert "[Earlier conversation summary:" in agent.history[0]["content"]
+    assert agent.history[1] == {
+        "role": "assistant",
+        "content": "Understood, I have context from our earlier conversation.",
+    }
+
+
+def test_summarize_and_truncate_falls_back_on_error():
+    # When the summarization API call fails, keep the recent half (no crash, no growth)
+    agent = AgentLoop(
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        store=MagicMock(),
+        repo_root="/repo",
+        max_history_turns=2,
+    )
+    agent.llm.client.messages.create.side_effect = Exception("API error")
+    agent.llm.respond.return_value = "answer"
+
+    agent.ask("q0")
+    agent.ask("q1")
+    agent.ask("q2")  # triggers fallback
+
+    # No summary messages — fallback keeps recent half
+    assert all(
+        "[Earlier conversation summary:" not in m.get("content", "")
+        for m in agent.history
+    )
+    # History is capped, not unbounded
+    assert len(agent.history) <= 4

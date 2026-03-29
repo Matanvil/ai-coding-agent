@@ -52,14 +52,14 @@ class AgentLoop:
         if len(self.history) <= max_messages:
             return
 
-        mid = len(self.history) // 2
+        mid = (len(self.history) // 4) * 2
         old_messages = self.history[:mid]
         recent_messages = self.history[mid:]
 
         try:
             response = self.llm.client.messages.create(
                 model=self.llm.model,
-                max_tokens=512,
+                max_tokens=1024,
                 system=SUMMARIZATION_SYSTEM_PROMPT,
                 messages=old_messages,
             )
@@ -69,7 +69,7 @@ class AgentLoop:
                 {"role": "assistant", "content": "Understood, I have context from our earlier conversation."},
             ] + recent_messages
         except Exception:
-            # Fallback: discard old half, keep recent
+            # Summarization failed — silently fall back to dropping old messages
             self.history = recent_messages
 
     def ask(self, question: str, on_tool_call: Optional[Callable] = None) -> str:

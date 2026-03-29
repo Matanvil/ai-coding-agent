@@ -1,29 +1,28 @@
 import chromadb
 from chromadb.errors import NotFoundError
-from typing import List, Optional
+from typing import List
 from src.models import Chunk
-
-COLLECTION_NAME = "codebase"
 
 
 class VectorStore:
-    def __init__(self, chroma_path: str = ".chroma", _client=None):
+    def __init__(self, chroma_path: str = ".chroma", collection_name: str = "codebase", _client=None):
         self.path = chroma_path
-        self._client = _client  # injectable for testing
+        self.collection_name = collection_name
+        self._client = _client
         self._collection = None
         # If a test client is provided, ensure fresh state by deleting existing collection
         if self._client is not None:
             try:
-                self._client.delete_collection(COLLECTION_NAME)
+                self._client.delete_collection(self.collection_name)
             except (ValueError, NotFoundError):
-                pass  # collection doesn't exist yet
+                pass
 
     def _get_collection(self):
         if self._client is None:
             self._client = chromadb.PersistentClient(path=self.path)
         if self._collection is None:
             self._collection = self._client.get_or_create_collection(
-                COLLECTION_NAME,
+                self.collection_name,
                 metadata={"hnsw:space": "cosine"},
             )
         return self._collection
@@ -57,7 +56,6 @@ class VectorStore:
             results["metadatas"][0],
             results["distances"][0],
         ):
-            # cosine distance (0–2) → similarity score (0–1)
             score = round(1.0 - (dist / 2.0), 4)
             chunks.append(
                 Chunk(
@@ -93,10 +91,25 @@ class VectorStore:
     def clear(self) -> None:
         self._get_collection()  # ensure client is initialized
         try:
-            self._client.delete_collection(COLLECTION_NAME)
+            self._client.delete_collection(self.collection_name)
         except (ValueError, NotFoundError):
-            pass  # collection did not exist — that's fine
+            pass
         self._collection = None
 
     def count(self) -> int:
         return self._get_collection().count()
+
+    def list_collections(self) -> list:
+        """Return [{"name": str, "count": int}, ...] for all collections in the store."""
+        if self._client is None:
+            self._client = chromadb.PersistentClient(path=self.path)
+        result = []
+        for col in self._client.list_collections():
+            # ChromaDB may return Collection objects or strings depending on version
+            name = col.name if hasattr(col, "name") else str(col)
+            try:
+                count = col.count() if hasattr(col, "count") else self._client.get_collection(name).count()
+            except Exception:
+                count = 0
+            result.append({"name": name, "count": count})
+        return result

@@ -74,3 +74,41 @@ def test_add_preserves_metadata():
     assert results[0].file == "services/auth.py"
     assert results[0].start_line == 42
     assert results[0].chunk_type == "class"
+
+
+def test_collection_name_isolates_data():
+    client = chromadb.EphemeralClient()
+    store_a = VectorStore(collection_name="repo_a", _client=client)
+    store_b = VectorStore(collection_name="repo_b", _client=client)
+    store_a.add([make_chunk("def foo(): pass")], [[0.1] * 768])
+    assert store_a.count() == 1
+    assert store_b.count() == 0  # separate collection — not affected
+
+
+def test_list_collections_returns_all_collections():
+    client = chromadb.EphemeralClient()
+    store_a = VectorStore(collection_name="repo_a", _client=client)
+    store_b = VectorStore(collection_name="repo_b", _client=client)
+    store_a.add([make_chunk("code a")], [[0.1] * 768])
+    store_b.add([make_chunk("code b")], [[0.2] * 768])
+    collections = store_a.list_collections()
+    names = [c["name"] for c in collections]
+    assert "repo_a" in names
+    assert "repo_b" in names
+    repo_a_info = next(c for c in collections if c["name"] == "repo_a")
+    assert repo_a_info["count"] == 1
+
+
+def test_list_collections_returns_empty_list():
+    client = chromadb.EphemeralClient()
+    # Delete all existing collections to ensure a clean slate
+    for col in client.list_collections():
+        name = col.name if hasattr(col, "name") else str(col)
+        try:
+            client.delete_collection(name)
+        except Exception:
+            pass
+    store = VectorStore(collection_name="unused", _client=client)
+    # No data added, no _get_collection() called — no collections exist
+    collections = store.list_collections()
+    assert collections == []

@@ -98,3 +98,75 @@ def test_index_repo_returns_chunk_count(tmp_path):
     assert count == 2  # one chunk per file (50 lines / chunk_size=50 = 1 chunk each)
     assert store.count() == 2
     assert embedder.embed.call_count == 2  # embed called once per chunk
+
+
+from src.indexer import chunk_file_semantic
+
+
+def test_semantic_chunking_extracts_top_level_definitions(tmp_path):
+    code = '''
+def authenticate(user, token):
+    """Check credentials."""
+    return validate_token(token)
+
+
+def validate_token(token):
+    """Validate a JWT token."""
+    return token is not None
+
+
+class AuthService:
+    def login(self, user, password):
+        return True
+'''
+    f = tmp_path / "auth.py"
+    f.write_text(code)
+    chunks = chunk_file_semantic(f, str(tmp_path))
+    chunk_types = [c.chunk_type for c in chunks]
+    texts = [c.text for c in chunks]
+    # 3 top-level definitions: authenticate, validate_token, AuthService
+    assert len(chunks) == 3
+    assert "function" in chunk_types
+    assert "class" in chunk_types
+    assert any("authenticate" in t for t in texts)
+    assert any("AuthService" in t for t in texts)
+
+
+def test_semantic_chunking_sets_correct_start_line(tmp_path):
+    code = "x = 1\n\ndef foo():\n    pass\n"
+    f = tmp_path / "code.py"
+    f.write_text(code)
+    chunks = chunk_file_semantic(f, str(tmp_path))
+    func_chunks = [c for c in chunks if c.chunk_type == "function"]
+    assert len(func_chunks) == 1
+    assert func_chunks[0].start_line == 3  # def foo() is on line 3
+
+
+def test_semantic_chunking_falls_back_for_js(tmp_path):
+    f = tmp_path / "app.js"
+    f.write_text("const x = 1;\nconst y = 2;")
+    chunks = chunk_file_semantic(f, str(tmp_path))
+    # JS falls back to naive — chunk_type is "block"
+    assert all(c.chunk_type == "block" for c in chunks)
+
+
+def test_semantic_chunking_falls_back_for_invalid_python(tmp_path):
+    f = tmp_path / "broken.py"
+    f.write_text("def foo(:\n    broken syntax")
+    # Should not raise — falls back to naive chunking
+    chunks = chunk_file_semantic(f, str(tmp_path))
+    assert isinstance(chunks, list)
+
+
+def test_index_repo_uses_semantic_chunking(tmp_path):
+    code = "def foo():\n    pass\n\ndef bar():\n    pass\n"
+    (tmp_path / "code.py").write_text(code)
+
+    client = chromadb.EphemeralClient()
+    store = VectorStore(_client=client)
+    embedder = MagicMock()
+    embedder.embed.return_value = [0.1] * 768
+
+    count = index_repo(str(tmp_path), embedder, store, use_semantic=True)
+    assert count == 2  # two top-level functions = two chunks
+    assert embedder.embed.call_count == 2

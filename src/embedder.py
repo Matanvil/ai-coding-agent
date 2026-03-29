@@ -6,6 +6,9 @@ class EmbedderError(Exception):
     pass
 
 
+MAX_EMBED_CHARS = 6000  # nomic-embed-text context limit is 8192 tokens; ~6000 chars is safe
+
+
 class OllamaEmbedder:
     def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434"):
         self.model = model
@@ -15,7 +18,7 @@ class OllamaEmbedder:
         try:
             response = requests.post(
                 f"{self.base_url}/api/embeddings",
-                json={"model": self.model, "prompt": text},
+                json={"model": self.model, "prompt": text[:MAX_EMBED_CHARS]},
                 timeout=30,
             )
             response.raise_for_status()

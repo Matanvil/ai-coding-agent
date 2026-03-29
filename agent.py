@@ -34,7 +34,8 @@ _PROMPT_STYLE = Style.from_dict({"": "bg:#1a1a2e #ffffff"})
 def build_components(config):
     embedder = OllamaEmbedder(model=config.embedding_model, base_url=config.ollama_url)
     store = VectorStore(chroma_path=config.chroma_path)
-    llm = ClaudeClient(model=config.model)
+    api_key = config.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    llm = ClaudeClient(model=config.model, api_key=api_key)
     agent = AgentLoop(llm=llm, embedder=embedder, store=store, repo_root=config.repo_path)
     return embedder, store, llm, agent
 
@@ -100,11 +101,12 @@ def handle_question(question: str, agent, store):
 
 
 def main():
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY is not set.")
-        sys.exit(1)
-
     config = load_config()
+
+    if not config.api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Error: No API key found.")
+        print("Add \"api_key\": \"your_key\" to config.json, or set ANTHROPIC_API_KEY in your environment.")
+        sys.exit(1)
     embedder, store, llm, agent = build_components(config)
 
     print(BANNER)

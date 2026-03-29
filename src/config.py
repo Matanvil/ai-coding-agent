@@ -13,6 +13,7 @@ class Config:
     ollama_url: str
     chroma_path: str
     max_results: int
+    api_key: str
 
 
 def load_config() -> Config:
@@ -27,6 +28,7 @@ def load_config() -> Config:
         ollama_url=data.get("ollama_url", "http://localhost:11434"),
         chroma_path=data.get("chroma_path", ".chroma"),
         max_results=data.get("max_results", 5),
+        api_key=data.get("api_key", ""),
     )
 
 
@@ -39,4 +41,5 @@ def save_config(config: Config) -> None:
             "ollama_url": config.ollama_url,
             "chroma_path": config.chroma_path,
             "max_results": config.max_results,
+            "api_key": config.api_key,
         }, f, indent=2)

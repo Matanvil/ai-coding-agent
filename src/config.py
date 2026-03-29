@@ -7,7 +7,8 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 @dataclass
 class Config:
-    repo_path: str
+    active_repo: str    # name of currently active repo, "" if none
+    repos: dict         # { name: { "path": str, "indexed_at": str } }
     model: str
     embedding_model: str
     ollama_url: str
@@ -22,7 +23,8 @@ def load_config() -> Config:
         with open(CONFIG_PATH) as f:
             data = json.load(f)
     return Config(
-        repo_path=data.get("repo_path", ""),
+        active_repo=data.get("active_repo", ""),
+        repos=data.get("repos", {}),
         model=data.get("model", "claude-haiku-4-5-20251001"),
         embedding_model=data.get("embedding_model", "nomic-embed-text"),
         ollama_url=data.get("ollama_url", "http://localhost:11434"),
@@ -35,7 +37,8 @@ def load_config() -> Config:
 def save_config(config: Config) -> None:
     with open(CONFIG_PATH, "w") as f:
         json.dump({
-            "repo_path": config.repo_path,
+            "active_repo": config.active_repo,
+            "repos": config.repos,
             "model": config.model,
             "embedding_model": config.embedding_model,
             "ollama_url": config.ollama_url,

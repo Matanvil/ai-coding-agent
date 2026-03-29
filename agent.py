@@ -8,6 +8,9 @@ from src.store import VectorStore
 from src.indexer import index_repo
 from src.llm import ClaudeClient
 from src.agent_loop import AgentLoop
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style
 
 BANNER = "AI Coding Agent — type 'help' for commands, 'exit' to quit."
 
@@ -23,6 +26,10 @@ Commands:
 You can also type a question directly without 'ask'.
 """
 
+DIVIDER = "─" * 48
+
+_PROMPT_STYLE = Style.from_dict({"": "bg:#1a1a2e #ffffff"})
+
 
 def build_components(config):
     embedder = OllamaEmbedder(model=config.embedding_model, base_url=config.ollama_url)
@@ -30,6 +37,14 @@ def build_components(config):
     llm = ClaudeClient(model=config.model)
     agent = AgentLoop(llm=llm, embedder=embedder, store=store, repo_root=config.repo_path)
     return embedder, store, llm, agent
+
+
+def build_session() -> PromptSession:
+    history_file = Path.home() / ".ai-agent-history"
+    return PromptSession(
+        history=FileHistory(str(history_file)),
+        style=_PROMPT_STYLE,
+    )
 
 
 def run_index(rest: str, config, embedder, store, llm):
@@ -81,6 +96,7 @@ def handle_question(question: str, agent, store):
 
     answer = agent.ask(question, on_tool_call=on_tool_call)
     print(f"\n{answer}\n")
+    print(DIVIDER)
 
 
 def main():
@@ -100,9 +116,11 @@ def main():
         print("No repo configured. Run: index --repo <path>")
     print()
 
+    session = build_session()
+
     while True:
         try:
-            user_input = input("> ").strip()
+            user_input = session.prompt("> ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye.")
             break

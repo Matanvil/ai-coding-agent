@@ -44,6 +44,7 @@ def run_index(rest: str, config, embedder, store, llm):
         print("Error: No repo configured. Run: index --repo <path>")
         return config, None
 
+    repo_path = str(Path(repo_path).expanduser().resolve())
     if not Path(repo_path).exists():
         print(f"Error: Path does not exist: {repo_path}")
         return config, None

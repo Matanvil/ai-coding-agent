@@ -86,3 +86,36 @@ def test_tool_handler_returns_error_for_unknown_tool():
     agent = make_agent()
     result = agent._tool_handler("nonexistent_tool", {})
     assert "Unknown tool" in result
+
+
+def test_history_is_capped_at_max_history_turns():
+    agent = AgentLoop(
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        store=MagicMock(),
+        repo_root="/repo",
+        max_history_turns=3,
+    )
+    agent.llm.respond.return_value = "answer"
+
+    for i in range(10):
+        agent.ask(f"question {i}")
+
+    # Exactly max_history_turns * 2 messages (3 exchanges = 6 messages)
+    assert len(agent.history) == 3 * 2
+
+
+def test_history_not_truncated_when_under_limit():
+    agent = AgentLoop(
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        store=MagicMock(),
+        repo_root="/repo",
+        max_history_turns=10,
+    )
+    agent.llm.respond.return_value = "answer"
+
+    agent.ask("q1")
+    agent.ask("q2")
+
+    assert len(agent.history) == 4  # 2 questions + 2 answers, under limit

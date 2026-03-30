@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 from src.tools import search_codebase, read_file
 from src.agent_loop import format_chunks
 
@@ -104,7 +105,7 @@ REVIEWER_TOOL_DEFINITIONS = [
 
 @dataclass
 class ReviewIssue:
-    category: str       # "critical" | "important" | "suggestion"
+    category: Literal["critical", "important", "suggestion"]
     description: str
     file: str           # empty string if not file-specific
     recommendation: str
@@ -113,7 +114,7 @@ class ReviewIssue:
 @dataclass
 class ReviewResult:
     summary: str
-    issues: list
+    issues: list[ReviewIssue]
     suggest_fix_plan: bool
 
 

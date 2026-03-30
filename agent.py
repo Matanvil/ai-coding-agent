@@ -9,7 +9,7 @@ from src.store import VectorStore
 from src.indexer import index_repo
 from src.llm import ClaudeClient
 from src.agent_loop import AgentLoop
-from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan, plan_filepath
+from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan
 from src.planner import Planner, PlannerError
 from src.executor import Executor
 from prompt_toolkit import PromptSession
@@ -220,6 +220,7 @@ def run_plan(task: str, config, embedder, llm, store) -> None:
         confirm = input(f"A plan already exists for {config.active_repo}. Overwrite? [y/n]: ").strip().lower()
         if confirm != "y":
             return
+        delete_plan(active, PLANS_DIR)
     repo_path = config.repos[config.active_repo]["path"]
     planner = Planner(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
     print("Planning...")

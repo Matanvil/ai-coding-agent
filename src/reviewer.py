@@ -131,7 +131,67 @@ class Reviewer:
         self.max_iterations = max_iterations
 
     def _tool_handler(self, tool_name: str, tool_input: dict) -> str:
-        raise NotImplementedError
+        if tool_name == "search_codebase":
+            chunks = search_codebase(tool_input["query"], self.embedder, self.store)
+            return format_chunks(chunks)
+        if tool_name == "read_file":
+            try:
+                return read_file(tool_input["path"], self.repo_root)
+            except (ValueError, FileNotFoundError) as e:
+                return f"Error: {e}"
+        return f"Unknown tool: {tool_name}"
 
     def review(self, diff: str, context: str) -> ReviewResult:
-        raise NotImplementedError
+        """Run the reviewer ReAct loop. Returns ReviewResult when submit_review is called."""
+        message = f"Git diff:\n{diff}\n\nContext: {context}\n\nReview the changes above."
+        messages = [{"role": "user", "content": message}]
+
+        for _ in range(self.max_iterations):
+            response = self.llm.client.messages.create(
+                model=self.llm.model,
+                max_tokens=4096,
+                system=REVIEWER_SYSTEM_PROMPT,
+                tools=REVIEWER_TOOL_DEFINITIONS,
+                messages=messages,
+            )
+
+            if response.stop_reason == "tool_use":
+                messages.append({"role": "assistant", "content": response.content})
+                tool_results = []
+                review_result = None
+
+                for block in response.content:
+                    if block.type != "tool_use":
+                        continue
+                    if block.name == "submit_review":
+                        data = block.input
+                        review_result = ReviewResult(
+                            summary=data["summary"],
+                            issues=[
+                                ReviewIssue(
+                                    category=i["category"],
+                                    description=i["description"],
+                                    file=i.get("file", ""),
+                                    recommendation=i["recommendation"],
+                                )
+                                for i in data.get("issues", [])
+                            ],
+                            suggest_fix_plan=data.get("suggest_fix_plan", False),
+                        )
+                    else:
+                        result = self._tool_handler(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
+
+                if tool_results:
+                    messages.append({"role": "user", "content": tool_results})
+
+                if review_result is not None:
+                    return review_result
+            else:
+                break
+
+        raise ReviewerError("Reviewer could not produce a review. Try providing more context.")

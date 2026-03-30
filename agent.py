@@ -14,6 +14,7 @@ from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan
 from src.planner import Planner, PlannerError
 from src.executor import Executor
 from src.reviewer import Reviewer, ReviewerError, ReviewResult
+from src.narration import narrate_event
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
@@ -193,15 +194,12 @@ def handle_question(question: str, agent, store):
 
     print("Thinking...")
 
-    def on_tool_call(tool_name, tool_input):
-        if tool_name == "search_codebase":
-            print(f" → searching: \"{tool_input.get('query', '')}\"")
-        elif tool_name == "trace_flow":
-            print(f" → tracing: {tool_input.get('entry_point', '')}")
-        elif tool_name == "read_file":
-            print(f" → reading: {tool_input.get('path', '')}")
+    def on_event(event_type, data):
+        msg = narrate_event(event_type, data)
+        if msg:
+            print(f" → {msg}")
 
-    answer = agent.ask(question, on_tool_call=on_tool_call)
+    answer = agent.ask(question, on_event=on_event)
     print(f"\n{answer}\n")
     print(DIVIDER)
 
@@ -245,9 +243,14 @@ def run_plan(task: str, config, embedder, llm, store) -> None:
         delete_plan(active, PLANS_DIR)
     repo_path = config.repos[config.active_repo]["path"]
     planner = Planner(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
-    print("Planning...")
+
+    def on_event(event_type, data):
+        msg = narrate_event(event_type, data)
+        if msg:
+            print(f" → {msg}")
+
     try:
-        plan = planner.plan(task=task, repo=config.active_repo)
+        plan = planner.plan(task=task, repo=config.active_repo, on_event=on_event)
     except PlannerError as e:
         print(f"Error: {e}")
         return
@@ -265,9 +268,14 @@ def run_plan_revise(feedback: str, config, embedder, llm, store) -> None:
         return
     repo_path = config.repos[config.active_repo]["path"]
     planner = Planner(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
-    print("Revising plan...")
+
+    def on_event(event_type, data):
+        msg = narrate_event(event_type, data)
+        if msg:
+            print(f" → {msg}")
+
     try:
-        revised = planner.revise(active, feedback)
+        revised = planner.revise(active, feedback, on_event=on_event)
     except PlannerError as e:
         print(f"Error: {e}")
         return
@@ -319,10 +327,14 @@ def run_review(context: str, config, embedder, llm, store) -> None:
         print("No uncommitted changes to review.")
         return
 
+    def on_event(event_type, data):
+        msg = narrate_event(event_type, data)
+        if msg:
+            print(f" → {msg}")
+
     reviewer = Reviewer(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
-    print("Reviewing...")
     try:
-        review = reviewer.review(diff=diff, context=context)
+        review = reviewer.review(diff=diff, context=context, on_event=on_event)
     except ReviewerError as e:
         print(f"Error: {e}")
         return

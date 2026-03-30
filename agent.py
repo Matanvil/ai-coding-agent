@@ -351,7 +351,7 @@ def run_execute(config, llm, embedder, store) -> None:
     executor = Executor(llm=llm, repo_root=repo_path, plans_dir=PLANS_DIR)
     plan = executor.execute(active)
     if plan.status == "completed":
-        run_review(active.task, config, embedder, llm, store)
+        run_review(plan.task, config, embedder, llm, store)
 
 
 def run_plans_list(config) -> None:

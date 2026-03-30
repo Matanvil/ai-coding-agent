@@ -144,3 +144,5 @@ def test_review_with_mixed_tool_response_returns_result():
 
     assert isinstance(result, ReviewResult)
     assert result.summary == "Mixed response summary."
+    # Verify _tool_handler was called for the search_codebase block
+    assert store.search.called

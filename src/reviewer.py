@@ -163,8 +163,11 @@ class Reviewer:
                 for block in response.content:
                     if block.type != "tool_use":
                         continue
-                    # submit_review terminates the loop immediately — no tool_result
-                    # needed since the conversation never continues after this call.
+                    # submit_review terminates the loop. Any preceding tool results
+                    # in this same response batch are appended to messages (below),
+                    # but since we return immediately after, the messages list is
+                    # discarded. This is intentional — do not "fix" by skipping the
+                    # tool_results append.
                     if block.name == "submit_review":
                         data = block.input
                         review_result = ReviewResult(

@@ -1,5 +1,5 @@
 from pathlib import Path
-from src.plan_store import Plan, FileEdit, save_plan
+from src.plan_store import Plan, FileEdit, save_plan, ApprovalDecision
 
 REVISION_SYSTEM_PROMPT = """You are an expert coding assistant revising a single file edit based on feedback.
 Call submit_plan with one revised edit. The edit's old_code must be an exact string from the file."""
@@ -149,8 +149,8 @@ class Executor:
         print("Revision failed. Showing original edit.")
         return edit  # fallback: return original unchanged
 
-    def execute(self, plan: Plan) -> Plan:
-        """Walk through plan edits interactively. Returns updated plan."""
+    def execute(self, plan: Plan, approval_fn=None, on_event=None) -> Plan:
+        """Walk through plan edits. Uses approval_fn if provided, else falls back to input()."""
         plan.status = "in_progress"
         save_plan(plan, self.plans_dir)
 
@@ -160,41 +160,72 @@ class Executor:
             if edit.status != "pending":
                 continue  # resume: skip already-processed edits
 
-            self._show_diff(edit, i + 1, total)
+            if approval_fn is None:
+                self._show_diff(edit, i + 1, total)
+            elif on_event:
+                on_event("edit_presented", {
+                    "index": i + 1,
+                    "total": total,
+                    "file": edit.file,
+                    "description": edit.description,
+                })
 
             while True:
-                choice = input("[a]pply / [s]kip / [r]evise / [q]uit: ").strip().lower()
+                if approval_fn is None:
+                    raw = input("[a]pply / [s]kip / [r]evise / [q]uit: ").strip().lower()
+                    if raw == "r":
+                        feedback = input("Feedback: ").strip()
+                        decision = ApprovalDecision("revise", feedback)
+                    elif raw == "a":
+                        decision = ApprovalDecision("apply")
+                    elif raw == "s":
+                        decision = ApprovalDecision("skip")
+                    elif raw == "q":
+                        decision = ApprovalDecision("quit")
+                    else:
+                        print("Please enter a, s, r, or q.")
+                        continue
+                else:
+                    decision = approval_fn(edit)
 
-                if choice == "a":
+                if decision.action == "apply":
                     success = self._apply_edit(edit)
                     edit.status = "applied" if success else "rejected"
                     save_plan(plan, self.plans_dir)
+                    if on_event:
+                        on_event("edit_applied" if success else "edit_skipped", {"file": edit.file})
                     break
-                elif choice == "s":
+                elif decision.action == "skip":
                     edit.status = "rejected"
                     save_plan(plan, self.plans_dir)
+                    if on_event:
+                        on_event("edit_skipped", {"file": edit.file})
                     break
-                elif choice == "r":
-                    feedback = input("Feedback: ").strip()
-                    if feedback:
-                        revised = self._revise_edit(edit, feedback)
+                elif decision.action == "revise":
+                    if decision.feedback:
+                        revised = self._revise_edit(edit, decision.feedback)
                         edit.file = revised.file
                         edit.description = revised.description
                         edit.old_code = revised.old_code
                         edit.new_code = revised.new_code
-                    self._show_diff(edit, i + 1, total)
-                elif choice == "q":
+                    if on_event:
+                        on_event("edit_revised", {"file": edit.file})
+                    elif approval_fn is None:
+                        self._show_diff(edit, i + 1, total)
+                elif decision.action == "quit":
                     plan.status = "in_progress"
                     save_plan(plan, self.plans_dir)
                     return plan
-                else:
-                    print("Please enter a, s, r, or q.")
 
         plan.status = "completed"
         save_plan(plan, self.plans_dir)
 
         applied = sum(1 for e in plan.edits if e.status == "applied")
         skipped = sum(1 for e in plan.edits if e.status == "rejected")
-        print(f"\nDone. {applied} applied, {skipped} skipped.")
+
+        if approval_fn is None:
+            print(f"\nDone. {applied} applied, {skipped} skipped.")
+        if on_event:
+            on_event("execution_complete", {"applied": applied, "skipped": skipped})
 
         return plan

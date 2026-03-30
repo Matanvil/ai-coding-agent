@@ -9,6 +9,9 @@ from src.store import VectorStore
 from src.indexer import index_repo
 from src.llm import ClaudeClient
 from src.agent_loop import AgentLoop
+from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan, plan_filepath
+from src.planner import Planner, PlannerError
+from src.executor import Executor
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
@@ -22,6 +25,11 @@ Commands:
   index [--repo <path>]       Index or re-index a repository
   use <repo>                  Switch to an indexed repo
   repos                       List all indexed repos
+  plan <task>                 Create a plan to edit the codebase
+  plan revise <feedback>      Revise the current pending plan
+  plan clear                  Discard the current pending plan
+  execute                     Execute the current pending plan
+  plans                       List all plans for the active repo
   clear                       Clear conversation history
   help                        Show this help
   exit                        Quit
@@ -32,6 +40,8 @@ You can also type a question directly without 'ask'.
 DIVIDER = "─" * 48
 
 _PROMPT_STYLE = Style.from_dict({"": "bg:#1a1a2e #ffffff"})
+
+PLANS_DIR = str(Path(__file__).parent / "plans")
 
 
 def build_shared(config):
@@ -193,6 +203,101 @@ def handle_question(question: str, agent, store):
     print(DIVIDER)
 
 
+def _print_plan_summary(plan) -> None:
+    count = len(plan.edits)
+    print(f"\nPlan created: {count} edit{'s' if count != 1 else ''} for \"{plan.task}\"")
+    for i, edit in enumerate(plan.edits, 1):
+        print(f"  {i}. {edit.file} — {edit.description}")
+    print("\nRun 'execute' to apply.")
+
+
+def run_plan(task: str, config, embedder, llm, store) -> None:
+    if not config.active_repo or not store:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+    active = get_active_plan(config.active_repo, PLANS_DIR)
+    if active:
+        confirm = input(f"A plan already exists for {config.active_repo}. Overwrite? [y/n]: ").strip().lower()
+        if confirm != "y":
+            return
+    repo_path = config.repos[config.active_repo]["path"]
+    planner = Planner(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
+    print("Planning...")
+    try:
+        plan = planner.plan(task=task, repo=config.active_repo)
+    except PlannerError as e:
+        print(f"Error: {e}")
+        return
+    save_plan(plan, PLANS_DIR)
+    _print_plan_summary(plan)
+
+
+def run_plan_revise(feedback: str, config, embedder, llm, store) -> None:
+    if not config.active_repo or not store:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+    active = get_active_plan(config.active_repo, PLANS_DIR)
+    if not active:
+        print("No pending plan to revise. Run: plan <task>")
+        return
+    repo_path = config.repos[config.active_repo]["path"]
+    planner = Planner(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
+    print("Revising plan...")
+    try:
+        revised = planner.revise(active, feedback)
+    except PlannerError as e:
+        print(f"Error: {e}")
+        return
+    revised.created_at = active.created_at  # overwrite same file
+    save_plan(revised, PLANS_DIR)
+    _print_plan_summary(revised)
+
+
+def run_plan_clear(config) -> None:
+    if not config.active_repo:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+    active = get_active_plan(config.active_repo, PLANS_DIR)
+    if not active:
+        print(f"No pending plan for {config.active_repo}.")
+        return
+    confirm = input("Discard current plan? [y/n]: ").strip().lower()
+    if confirm != "y":
+        return
+    delete_plan(active, PLANS_DIR)
+    print("Plan discarded.")
+
+
+def run_execute(config, llm) -> None:
+    if not config.active_repo:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+    active = get_active_plan(config.active_repo, PLANS_DIR)
+    if not active:
+        print(f"No pending plan for {config.active_repo}. Run: plan <task>")
+        return
+    if active.repo != config.active_repo:
+        print(f"Plan was created for '{active.repo}'. Switch to it with 'use {active.repo}' first.")
+        return
+    repo_path = config.repos[config.active_repo]["path"]
+    executor = Executor(llm=llm, repo_root=repo_path, plans_dir=PLANS_DIR)
+    executor.execute(active)
+
+
+def run_plans_list(config) -> None:
+    if not config.active_repo:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+    all_plans = list_plans(config.active_repo, PLANS_DIR)
+    if not all_plans:
+        print(f"No plans for {config.active_repo}.")
+        return
+    print(f"Plans for {config.active_repo}:")
+    for p in all_plans:
+        count = len(p.edits)
+        print(f"  [{p.status:<12}]  {p.created_at}  \"{p.task}\"  ({count} edit{'s' if count != 1 else ''})")
+
+
 def main():
     config = load_config()
 
@@ -261,6 +366,19 @@ def main():
                     agent = new_agent
         elif command == "repos":
             run_repos(config)
+        elif command == "plan":
+            if not rest:
+                print("Usage: plan <task>  |  plan revise <feedback>  |  plan clear")
+            elif rest.startswith("revise "):
+                run_plan_revise(rest[len("revise "):], config, embedder, llm, store)
+            elif rest == "clear":
+                run_plan_clear(config)
+            else:
+                run_plan(rest, config, embedder, llm, store)
+        elif command == "execute":
+            run_execute(config, llm)
+        elif command == "plans":
+            run_plans_list(config)
         elif command == "ask":
             if not rest:
                 print("Usage: ask <question>")

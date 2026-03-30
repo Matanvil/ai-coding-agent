@@ -1,0 +1,167 @@
+from datetime import datetime
+from src.plan_store import Plan, FileEdit
+from src.tools import search_codebase, read_file
+from src.agent_loop import format_chunks
+
+PLANNER_SYSTEM_PROMPT = """You are an expert coding assistant tasked with planning code changes.
+
+Your job:
+1. Search the codebase to understand the relevant code
+2. Read specific files to get the exact current content
+3. When you have a complete understanding, call submit_plan with a list of targeted edits
+
+Rules for edits:
+- Each edit's old_code must be an EXACT string copied verbatim from the file
+- Prefer multiple small edits over one large replacement
+- Only include files that actually need to change
+- Be minimal — do not change what does not need to change"""
+
+PLANNER_TOOL_DEFINITIONS = [
+    {
+        "name": "search_codebase",
+        "description": "Search the indexed codebase for relevant code.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language search query"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_file",
+        "description": "Read the full contents of a file in the repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative file path from repo root"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "submit_plan",
+        "description": "Submit the completed plan of file edits. Call this when you are ready.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "edits": {
+                    "type": "array",
+                    "description": "List of file edits",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file": {"type": "string"},
+                            "description": {"type": "string"},
+                            "old_code": {"type": "string"},
+                            "new_code": {"type": "string"},
+                        },
+                        "required": ["file", "description", "old_code", "new_code"],
+                    },
+                }
+            },
+            "required": ["edits"],
+        },
+    },
+]
+
+
+class PlannerError(Exception):
+    pass
+
+
+class Planner:
+    def __init__(self, llm, embedder, store, repo_root: str, max_iterations: int = 15):
+        self.llm = llm
+        self.embedder = embedder
+        self.store = store
+        self.repo_root = repo_root
+        self.max_iterations = max_iterations
+
+    def _tool_handler(self, tool_name: str, tool_input: dict) -> str:
+        if tool_name == "search_codebase":
+            chunks = search_codebase(tool_input["query"], self.embedder, self.store)
+            return format_chunks(chunks)
+        if tool_name == "read_file":
+            try:
+                return read_file(tool_input["path"], self.repo_root)
+            except (ValueError, FileNotFoundError) as e:
+                return f"Error: {e}"
+        return f"Unknown tool: {tool_name}"
+
+    def _run(self, messages: list, task: str) -> Plan:
+        """Run the planner ReAct loop. Returns Plan when submit_plan is called."""
+        current_messages = list(messages)
+
+        for _ in range(self.max_iterations):
+            response = self.llm.client.messages.create(
+                model=self.llm.model,
+                max_tokens=4096,
+                system=PLANNER_SYSTEM_PROMPT,
+                tools=PLANNER_TOOL_DEFINITIONS,
+                messages=current_messages,
+            )
+
+            if response.stop_reason == "tool_use":
+                current_messages.append({"role": "assistant", "content": response.content})
+
+                tool_results = []
+                for block in response.content:
+                    if block.type != "tool_use":
+                        continue
+                    if block.name == "submit_plan":
+                        edits = [
+                            FileEdit(
+                                file=e["file"],
+                                description=e["description"],
+                                old_code=e["old_code"],
+                                new_code=e["new_code"],
+                                status="pending",
+                            )
+                            for e in block.input["edits"]
+                        ]
+                        return Plan(
+                            task=task,
+                            repo="",  # set by caller
+                            created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            status="pending",
+                            edits=edits,
+                        )
+                    result = self._tool_handler(block.name, block.input)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    })
+
+                if tool_results:
+                    current_messages.append({"role": "user", "content": tool_results})
+
+            elif response.stop_reason == "end_turn":
+                break
+
+        raise PlannerError("Planner could not produce a plan. Try a more specific task.")
+
+    def plan(self, task: str, repo: str) -> Plan:
+        """Run the planner agent. Returns a Plan or raises PlannerError."""
+        messages = [{"role": "user", "content": task}]
+        plan = self._run(messages, task=task)
+        plan.repo = repo
+        return plan
+
+    def revise(self, plan: Plan, feedback: str) -> Plan:
+        """Re-run planner with existing plan + feedback. Returns revised Plan."""
+        edits_text = "\n".join(
+            f"  {i + 1}. {e.file} — {e.description}"
+            for i, e in enumerate(plan.edits)
+        )
+        message = (
+            f"Original task: {plan.task}\n\n"
+            f"Current plan:\n{edits_text}\n\n"
+            f"Feedback: {feedback}\n\n"
+            f"Please revise the plan based on this feedback."
+        )
+        revised = self._run([{"role": "user", "content": message}], task=plan.task)
+        revised.repo = plan.repo
+        revised.task = plan.task  # always preserve original task
+        return revised

@@ -1,7 +1,8 @@
 import json
 import pytest
-from src.ollama_client import _to_openai_tools, _parse_tool_call, _to_ollama_messages
-from src.llm import TOOL_DEFINITIONS
+from unittest.mock import MagicMock, patch
+from src.ollama_client import _to_openai_tools, _parse_tool_call, _to_ollama_messages, OllamaClient
+from src.llm import TOOL_DEFINITIONS, ToolCallParseError
 
 
 def test_to_openai_tools_translates_schema():
@@ -131,11 +132,6 @@ def test_to_ollama_messages_converts_tool_use():
     assert result[2]["role"] == "tool"
     assert result[2]["tool_call_id"] == "id1"
     assert result[2]["content"] == "auth.py:1"
-
-
-from unittest.mock import MagicMock, patch
-from src.ollama_client import OllamaClient
-from src.llm import ToolCallParseError
 
 
 def _ollama_tool_response(tool_name: str, args: dict, call_id: str = "call_1"):
@@ -269,3 +265,16 @@ def test_ollama_respond_fires_on_event(mock_post):
         on_event=lambda t, d: events.append((t, d)),
     )
     assert events == [("tool_call", {"tool": "read_file", "input": {"path": "src/llm.py"}})]
+
+
+@patch("src.ollama_client.requests.post")
+def test_ollama_respond_raises_on_connection_error(mock_post):
+    import requests as req
+    mock_post.side_effect = req.RequestException("connection refused")
+    client = OllamaClient(model="qwen3-coder:30b")
+    with pytest.raises(ToolCallParseError) as exc_info:
+        client.respond(
+            messages=[{"role": "user", "content": "q"}],
+            tool_handler=lambda name, inp: "",
+        )
+    assert "Ollama request failed" in str(exc_info.value)

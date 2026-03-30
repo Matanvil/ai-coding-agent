@@ -107,8 +107,7 @@ class OllamaClient(BaseLLMClient):
                     f"{self.base_url}/v1/chat/completions",
                     json={
                         "model": self.model,
-                        "system": SYSTEM_PROMPT,
-                        "messages": _to_ollama_messages(current_messages),
+                        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + _to_ollama_messages(current_messages),
                         "tools": self._openai_tools,
                     },
                     timeout=120,

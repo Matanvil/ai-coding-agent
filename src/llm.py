@@ -1,4 +1,5 @@
 import os
+from abc import ABC, abstractmethod
 import anthropic
 from typing import List, Dict, Any, Callable, Optional
 
@@ -58,7 +59,26 @@ When answering:
 5. Be concise and precise — developers value accuracy over verbosity"""
 
 
-class ClaudeClient:
+class ToolCallParseError(Exception):
+    """Raised by OllamaClient when a response cannot be parsed as a tool call or final answer."""
+    def __init__(self, message: str, partial: list = None):
+        super().__init__(message)
+        self.partial = partial if partial is not None else []
+
+
+class BaseLLMClient(ABC):
+    @abstractmethod
+    def respond(
+        self,
+        messages: List[Dict[str, Any]],
+        tool_handler: Callable[[str, Dict], str],
+        on_event: Optional[Callable[[str, Dict], None]] = None,
+        max_iterations: int = 10,
+    ) -> str:
+        ...
+
+
+class ClaudeClient(BaseLLMClient):
     def __init__(self, model: str = "claude-haiku-4-5-20251001", api_key: Optional[str] = None):
         self.model = model
         self.client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))

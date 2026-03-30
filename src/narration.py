@@ -37,4 +37,12 @@ def narrate_event(event_type: str, data: dict) -> str:
         return f"Revised: {data.get('file', '')}"
     if event_type == "execution_complete":
         return f"Done: {data.get('applied', 0)} applied, {data.get('skipped', 0)} skipped"
+    if event_type == "model_fallback":
+        turns = data.get("turns", 0)
+        kind = data.get("kind", "")
+        if kind == "parse_error" and turns:
+            return f"Local model failed after {turns} turn{'s' if turns != 1 else ''} — handing off to Claude"
+        if kind == "connection_error":
+            return "Local model unavailable — falling back to Claude"
+        return "Falling back to Claude"
     return ""

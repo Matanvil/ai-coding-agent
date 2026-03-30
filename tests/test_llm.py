@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from src.llm import ClaudeClient
+from src.llm import BaseLLMClient, ClaudeClient, ToolCallParseError
 
 
 def make_end_turn_response(text: str):
@@ -112,3 +112,20 @@ def test_respond_returns_fallback_after_max_iterations():
     )
     assert "Maximum iterations" in result
     assert client.client.messages.create.call_count == 3
+
+
+def test_claude_client_is_base_llm_client():
+    client = ClaudeClient(api_key="test")
+    assert isinstance(client, BaseLLMClient)
+
+
+def test_tool_call_parse_error_carries_partial():
+    partial = [{"role": "user", "content": "hi"}]
+    err = ToolCallParseError("bad response", partial=partial)
+    assert err.partial == partial
+    assert str(err) == "bad response"
+
+
+def test_tool_call_parse_error_defaults_partial_to_empty():
+    err = ToolCallParseError("bad response")
+    assert err.partial == []

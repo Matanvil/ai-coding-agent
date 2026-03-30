@@ -9,6 +9,8 @@ from src.embedder import OllamaEmbedder, EmbedderError
 from src.store import VectorStore
 from src.indexer import index_repo
 from src.llm import ClaudeClient
+from src.ollama_client import OllamaClient
+from src.hybrid_client import HybridClient
 from src.agent_loop import AgentLoop
 from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan
 from src.planner import Planner, PlannerError
@@ -48,11 +50,29 @@ _PROMPT_STYLE = Style.from_dict({"": "bg:#1a1a2e #ffffff"})
 PLANS_DIR = str(Path(__file__).parent / "plans")
 
 
-def build_shared(config):
+def parse_model_flag() -> bool:
+    """Return True if --model claude is in sys.argv."""
+    args = sys.argv[1:]
+    try:
+        idx = args.index("--model")
+        return idx + 1 < len(args) and args[idx + 1] == "claude"
+    except ValueError:
+        return False
+
+
+def build_shared(config, force_claude: bool = False):
     """Create embedder and LLM — shared across all repos."""
     embedder = OllamaEmbedder(model=config.embedding_model, base_url=config.ollama_url)
     api_key = config.api_key or os.environ.get("ANTHROPIC_API_KEY")
-    llm = ClaudeClient(model=config.model, api_key=api_key)
+    claude = ClaudeClient(model=config.model, api_key=api_key)
+
+    if config.local_model:
+        ollama = OllamaClient(model=config.local_model, base_url=config.ollama_url)
+        llm = HybridClient(ollama=ollama, claude=claude)
+        llm.force_claude = force_claude
+    else:
+        llm = claude
+
     return embedder, llm
 
 
@@ -76,14 +96,27 @@ def parse_cli_args() -> str:
     """Return repo name from CLI args, or '' if none provided.
 
     Accepts: python agent.py jarvis  OR  python agent.py --repo jarvis
+    Ignores: --model <value> pairs anywhere in the args.
     """
+    # Strip out known flag/value pairs so they don't interfere with positional arg detection
     args = sys.argv[1:]
-    if not args:
+    filtered = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--model",):
+            skip_next = True
+            continue
+        filtered.append(arg)
+
+    if not filtered:
         return ""
-    if args[0] == "--repo" and len(args) > 1:
-        return args[1]
-    if not args[0].startswith("-"):
-        return args[0]
+    if filtered[0] == "--repo" and len(filtered) > 1:
+        return filtered[1]
+    if not filtered[0].startswith("-"):
+        return filtered[0]
     return ""
 
 
@@ -388,7 +421,8 @@ def main():
         print('Add "api_key": "your_key" to config.json, or set ANTHROPIC_API_KEY in your environment.')
         sys.exit(1)
 
-    embedder, llm = build_shared(config)
+    force_claude = parse_model_flag()
+    embedder, llm = build_shared(config, force_claude=force_claude)
 
     store = None
     agent = None

@@ -72,12 +72,12 @@ class AgentLoop:
             # Summarization failed — silently fall back to dropping old messages
             self.history = recent_messages
 
-    def ask(self, question: str, on_tool_call: Optional[Callable] = None) -> str:
+    def ask(self, question: str, on_event: Optional[Callable] = None) -> str:
         self.history.append({"role": "user", "content": question})
         answer = self.llm.respond(
             messages=list(self.history),
             tool_handler=self._tool_handler,
-            on_tool_call=on_tool_call,
+            on_event=on_event,
         )
         self.history.append({"role": "assistant", "content": answer})
         self._summarize_and_truncate_history()

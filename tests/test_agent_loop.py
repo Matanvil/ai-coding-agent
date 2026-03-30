@@ -47,13 +47,13 @@ def test_clear_history_empties_history():
     assert agent.history == []
 
 
-def test_ask_passes_on_tool_call_callback():
+def test_ask_passes_on_event_callback():
     agent = make_agent()
     agent.llm.respond.return_value = "answer"
     callback = MagicMock()
-    agent.ask("question", on_tool_call=callback)
+    agent.ask("question", on_event=callback)
     call_kwargs = agent.llm.respond.call_args.kwargs
-    assert call_kwargs["on_tool_call"] is callback
+    assert call_kwargs["on_event"] is callback
 
 
 def test_tool_handler_dispatches_search_codebase(tmp_path):

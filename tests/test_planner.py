@@ -82,3 +82,54 @@ def test_revise_includes_original_task_and_feedback_in_message():
     assert "use a dict instead" in messages[0]["content"]
     assert revised.task == "add cache"   # original task preserved
     assert revised.repo == "myrepo"
+
+
+def test_unexpected_stop_reason_raises_planner_error():
+    # stop_reason "max_tokens" should break the loop and raise PlannerError
+    llm = MagicMock()
+    llm.model = "claude-haiku-4-5-20251001"
+    response = MagicMock()
+    response.stop_reason = "max_tokens"
+    response.content = []
+    llm.client.messages.create.return_value = response
+
+    planner = Planner(llm=llm, embedder=MagicMock(), store=MagicMock(), repo_root="/repo")
+    with pytest.raises(PlannerError):
+        planner.plan("add a cache layer", repo="myrepo")
+
+
+def test_mixed_tool_response_returns_plan_and_calls_other_tools():
+    # When submit_plan appears alongside other tool calls, plan is still returned
+    llm = MagicMock()
+    llm.model = "claude-haiku-4-5-20251001"
+
+    search_block = MagicMock()
+    search_block.type = "tool_use"
+    search_block.name = "search_codebase"
+    search_block.id = "tool_search"
+    search_block.input = {"query": "cache"}
+
+    submit_block = MagicMock()
+    submit_block.type = "tool_use"
+    submit_block.name = "submit_plan"
+    submit_block.id = "tool_submit"
+    submit_block.input = {"edits": [
+        {"file": "src/foo.py", "description": "add x", "old_code": "a = 1", "new_code": "a = 42"},
+    ]}
+
+    response = MagicMock()
+    response.stop_reason = "tool_use"
+    response.content = [search_block, submit_block]
+    llm.client.messages.create.return_value = response
+
+    store = MagicMock()
+    store.search.return_value = []
+    store.keyword_search.return_value = []
+    embedder = MagicMock()
+    embedder.embed.return_value = [0.1] * 768
+
+    planner = Planner(llm=llm, embedder=embedder, store=store, repo_root="/repo")
+    plan = planner.plan("add a cache layer", repo="myrepo")
+
+    assert isinstance(plan, Plan)
+    assert len(plan.edits) == 1

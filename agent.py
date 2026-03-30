@@ -298,12 +298,17 @@ def run_review(context: str, config, embedder, llm, store) -> None:
 
     repo_path = config.repos[config.active_repo]["path"]
 
-    proc = subprocess.run(
-        ["git", "diff", "HEAD"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
+    # git diff HEAD shows all uncommitted changes (both staged and unstaged) vs the last commit.
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print("Error: git not found. Ensure git is installed and on your PATH.")
+        return
     if proc.returncode != 0:
         print(f"Error running git diff: {proc.stderr}")
         return

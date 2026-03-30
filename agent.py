@@ -96,14 +96,27 @@ def parse_cli_args() -> str:
     """Return repo name from CLI args, or '' if none provided.
 
     Accepts: python agent.py jarvis  OR  python agent.py --repo jarvis
+    Ignores: --model <value> pairs anywhere in the args.
     """
+    # Strip out known flag/value pairs so they don't interfere with positional arg detection
     args = sys.argv[1:]
-    if not args:
+    filtered = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--model",):
+            skip_next = True
+            continue
+        filtered.append(arg)
+
+    if not filtered:
         return ""
-    if args[0] == "--repo" and len(args) > 1:
-        return args[1]
-    if not args[0].startswith("-"):
-        return args[0]
+    if filtered[0] == "--repo" and len(filtered) > 1:
+        return filtered[1]
+    if not filtered[0].startswith("-"):
+        return filtered[0]
     return ""
 
 

@@ -97,7 +97,7 @@ def test_narrate_model_fallback_connection_error():
     assert "Claude" in result
 
 
-def test_narrate_model_fallback_returns_empty_for_unknown():
+def test_narrate_model_fallback_unknown_kind_mentions_claude():
     # model_fallback with no known kind should still return something useful
     result = narrate_event("model_fallback", {"kind": "unknown", "reason": "x", "turns": 0})
     assert "Claude" in result

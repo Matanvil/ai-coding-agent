@@ -84,3 +84,20 @@ def test_execution_complete():
 def test_unknown_event_returns_empty_string():
     result = narrate_event("some_future_event", {"anything": True})
     assert result == ""
+
+
+def test_narrate_model_fallback_parse_error_with_turns():
+    result = narrate_event("model_fallback", {"kind": "parse_error", "reason": "bad", "turns": 3})
+    assert "Claude" in result
+    assert "3" in result
+
+
+def test_narrate_model_fallback_connection_error():
+    result = narrate_event("model_fallback", {"kind": "connection_error", "reason": "refused", "turns": 0})
+    assert "Claude" in result
+
+
+def test_narrate_model_fallback_returns_empty_for_unknown():
+    # model_fallback with no known kind should still return something useful
+    result = narrate_event("model_fallback", {"kind": "unknown", "reason": "x", "turns": 0})
+    assert "Claude" in result

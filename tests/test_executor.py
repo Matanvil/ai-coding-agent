@@ -83,3 +83,37 @@ def test_all_edits_processed_marks_completed(tmp_path):
 
     assert result.status == "completed"
     assert all(e.status == "rejected" for e in result.edits)
+
+
+def test_revise_then_apply_uses_revised_edit(tmp_path):
+    target = tmp_path / "src" / "foo.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("a = 1\nb = 2\n", encoding="utf-8")
+
+    plan = _make_plan(_edit())
+
+    # LLM returns a revised edit via submit_plan
+    submit_block = MagicMock()
+    submit_block.type = "tool_use"
+    submit_block.name = "submit_plan"
+    submit_block.id = "tool_1"
+    submit_block.input = {"edits": [
+        {"file": "src/foo.py", "description": "revised change", "old_code": "a = 1", "new_code": "a = 99"},
+    ]}
+    revision_response = MagicMock()
+    revision_response.stop_reason = "tool_use"
+    revision_response.content = [submit_block]
+
+    llm = MagicMock()
+    llm.model = "claude-haiku-4-5-20251001"
+    llm.client.messages.create.return_value = revision_response
+
+    executor = Executor(llm=llm, repo_root=str(tmp_path), plans_dir=str(tmp_path / "plans"))
+
+    # Simulate: r → feedback → a (apply the revised edit)
+    inputs = iter(["r", "use 99 instead", "a"])
+    with patch("builtins.input", side_effect=inputs):
+        result = executor.execute(plan)
+
+    assert result.edits[0].status == "applied"
+    assert "a = 99" in target.read_text(encoding="utf-8")

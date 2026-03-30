@@ -146,6 +146,7 @@ class Executor:
             if plan_edit is not None:
                 return plan_edit
 
+        print("Revision failed. Showing original edit.")
         return edit  # fallback: return original unchanged
 
     def execute(self, plan: Plan) -> Plan:

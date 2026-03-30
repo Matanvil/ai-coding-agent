@@ -106,3 +106,41 @@ def test_review_raises_reviewer_error_on_unexpected_stop_reason():
 
     with pytest.raises(ReviewerError):
         reviewer.review(diff="some diff", context="")
+
+
+def test_review_with_mixed_tool_response_returns_result():
+    """When submit_review and a regular tool appear in the same response, returns ReviewResult."""
+    llm = MagicMock()
+    llm.model = "claude-haiku-4-5-20251001"
+
+    search_block = MagicMock()
+    search_block.type = "tool_use"
+    search_block.name = "search_codebase"
+    search_block.id = "tool_0"
+    search_block.input = {"query": "error handling patterns"}
+
+    submit_block = MagicMock()
+    submit_block.type = "tool_use"
+    submit_block.name = "submit_review"
+    submit_block.id = "tool_1"
+    submit_block.input = {
+        "summary": "Mixed response summary.",
+        "issues": [],
+        "suggest_fix_plan": False,
+    }
+
+    response = MagicMock()
+    response.stop_reason = "tool_use"
+    response.content = [search_block, submit_block]
+
+    llm.client.messages.create.return_value = response
+
+    embedder = MagicMock()
+    store = MagicMock()
+    store.search.return_value = []
+
+    reviewer = Reviewer(llm=llm, embedder=embedder, store=store, repo_root="/repo")
+    result = reviewer.review(diff="+ new code", context="")
+
+    assert isinstance(result, ReviewResult)
+    assert result.summary == "Mixed response summary."

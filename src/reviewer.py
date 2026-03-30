@@ -163,6 +163,8 @@ class Reviewer:
                 for block in response.content:
                     if block.type != "tool_use":
                         continue
+                    # submit_review terminates the loop immediately — no tool_result
+                    # needed since the conversation never continues after this call.
                     if block.name == "submit_review":
                         data = block.input
                         review_result = ReviewResult(

@@ -141,8 +141,10 @@ class Reviewer:
                 return f"Error: {e}"
         return f"Unknown tool: {tool_name}"
 
-    def review(self, diff: str, context: str) -> ReviewResult:
+    def review(self, diff: str, context: str, on_event=None) -> ReviewResult:
         """Run the reviewer ReAct loop. Returns ReviewResult when submit_review is called."""
+        if on_event:
+            on_event("review_started", {})
         message = f"Git diff:\n{diff}\n\nContext: {context}\n\nReview the changes above."
         messages = [{"role": "user", "content": message}]
 
@@ -184,6 +186,8 @@ class Reviewer:
                             suggest_fix_plan=data.get("suggest_fix_plan", False),
                         )
                     else:
+                        if on_event:
+                            on_event("tool_call", {"tool": block.name, "input": block.input})
                         result = self._tool_handler(block.name, block.input)
                         tool_results.append({
                             "type": "tool_result",
@@ -195,6 +199,13 @@ class Reviewer:
                     messages.append({"role": "user", "content": tool_results})
 
                 if review_result is not None:
+                    if on_event:
+                        critical_count = sum(1 for i in review_result.issues if i.category == "critical")
+                        on_event("review_complete", {
+                            "issue_count": len(review_result.issues),
+                            "critical_count": critical_count,
+                            "suggest_fix_plan": review_result.suggest_fix_plan,
+                        })
                     return review_result
             else:
                 break

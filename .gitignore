@@ -4,4 +4,4 @@ __pycache__/
 .chroma/
 config.json
 .env
-.env.local
+.env.local.worktrees/

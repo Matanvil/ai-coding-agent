@@ -57,7 +57,7 @@ def test_respond_calls_tool_then_returns_answer():
     assert tool_calls[0] == ("search_codebase", {"query": "auth"})
 
 
-def test_on_tool_call_callback_is_invoked():
+def test_on_event_callback_is_invoked():
     client = ClaudeClient(api_key="test")
     client.client = MagicMock()
     client.client.messages.create.side_effect = [
@@ -65,13 +65,14 @@ def test_on_tool_call_callback_is_invoked():
         make_end_turn_response("auth.py contains..."),
     ]
 
-    callbacks = []
+    events = []
     client.respond(
         messages=[{"role": "user", "content": "show auth.py"}],
         tool_handler=lambda name, inp: "content",
-        on_tool_call=lambda name, inp: callbacks.append(name),
+        on_event=lambda event_type, data: events.append((event_type, data)),
     )
-    assert callbacks == ["read_file"]
+    assert len(events) == 1
+    assert events[0] == ("tool_call", {"tool": "read_file", "input": {"path": "auth.py"}})
 
 
 def test_respond_sends_tool_result_as_user_message():

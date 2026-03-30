@@ -67,7 +67,7 @@ class ClaudeClient:
         self,
         messages: List[Dict[str, Any]],
         tool_handler: Callable[[str, Dict], str],
-        on_tool_call: Optional[Callable[[str, Dict], None]] = None,
+        on_event: Optional[Callable[[str, Dict], None]] = None,
         max_iterations: int = 10,
     ) -> str:
         """Run the ReAct loop until a final answer is produced."""
@@ -94,8 +94,8 @@ class ClaudeClient:
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
-                        if on_tool_call:
-                            on_tool_call(block.name, block.input)
+                        if on_event:
+                            on_event("tool_call", {"tool": block.name, "input": block.input})
                         result = tool_handler(block.name, block.input)
                         tool_results.append({
                             "type": "tool_result",

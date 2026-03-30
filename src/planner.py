@@ -106,38 +106,42 @@ class Planner:
                 current_messages.append({"role": "assistant", "content": response.content})
 
                 tool_results = []
+                plan_to_return = None
                 for block in response.content:
                     if block.type != "tool_use":
                         continue
                     if block.name == "submit_plan":
-                        edits = [
-                            FileEdit(
-                                file=e["file"],
-                                description=e["description"],
-                                old_code=e["old_code"],
-                                new_code=e["new_code"],
-                                status="pending",
-                            )
-                            for e in block.input["edits"]
-                        ]
-                        return Plan(
+                        plan_to_return = Plan(
                             task=task,
                             repo="",  # set by caller
                             created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
                             status="pending",
-                            edits=edits,
+                            edits=[
+                                FileEdit(
+                                    file=e["file"],
+                                    description=e["description"],
+                                    old_code=e["old_code"],
+                                    new_code=e["new_code"],
+                                    status="pending",
+                                )
+                                for e in block.input["edits"]
+                            ],
                         )
-                    result = self._tool_handler(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
+                    else:
+                        result = self._tool_handler(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
 
                 if tool_results:
                     current_messages.append({"role": "user", "content": tool_results})
 
-            elif response.stop_reason == "end_turn":
+                if plan_to_return is not None:
+                    return plan_to_return
+
+            else:
                 break
 
         raise PlannerError("Planner could not produce a plan. Try a more specific task.")

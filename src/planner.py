@@ -89,7 +89,7 @@ class Planner:
                 return f"Error: {e}"
         return f"Unknown tool: {tool_name}"
 
-    def _run(self, messages: list, task: str) -> Plan:
+    def _run(self, messages: list, task: str, on_event=None) -> Plan:
         """Run the planner ReAct loop. Returns Plan when submit_plan is called."""
         current_messages = list(messages)
 
@@ -128,6 +128,8 @@ class Planner:
                             ],
                         )
                     else:
+                        if on_event:
+                            on_event("tool_call", {"tool": block.name, "input": block.input})
                         result = self._tool_handler(block.name, block.input)
                         tool_results.append({
                             "type": "tool_result",
@@ -146,15 +148,21 @@ class Planner:
 
         raise PlannerError("Planner could not produce a plan. Try a more specific task.")
 
-    def plan(self, task: str, repo: str) -> Plan:
+    def plan(self, task: str, repo: str, on_event=None) -> Plan:
         """Run the planner agent. Returns a Plan or raises PlannerError."""
+        if on_event:
+            on_event("planning_started", {"task": task})
         messages = [{"role": "user", "content": task}]
-        plan = self._run(messages, task=task)
+        plan = self._run(messages, task=task, on_event=on_event)
         plan.repo = repo
+        if on_event:
+            on_event("planning_complete", {"edit_count": len(plan.edits)})
         return plan
 
-    def revise(self, plan: Plan, feedback: str) -> Plan:
+    def revise(self, plan: Plan, feedback: str, on_event=None) -> Plan:
         """Re-run planner with existing plan + feedback. Returns revised Plan."""
+        if on_event:
+            on_event("planning_started", {"task": plan.task})
         edits_text = "\n".join(
             f"  {i + 1}. {e.file} — {e.description}"
             for i, e in enumerate(plan.edits)
@@ -165,7 +173,9 @@ class Planner:
             f"Feedback: {feedback}\n\n"
             f"Please revise the plan based on this feedback."
         )
-        revised = self._run([{"role": "user", "content": message}], task=plan.task)
+        revised = self._run([{"role": "user", "content": message}], task=plan.task, on_event=on_event)
         revised.repo = plan.repo
         revised.task = plan.task  # always preserve original task
+        if on_event:
+            on_event("planning_complete", {"edit_count": len(revised.edits)})
         return revised

@@ -15,6 +15,7 @@ class Config:
     chroma_path: str
     max_results: int
     api_key: str
+    local_model: str
 
 
 def load_config() -> Config:
@@ -31,6 +32,7 @@ def load_config() -> Config:
         chroma_path=data.get("chroma_path", ".chroma"),
         max_results=data.get("max_results", 5),
         api_key=data.get("api_key", ""),
+        local_model=data.get("local_model", ""),
     )
 
 
@@ -45,4 +47,5 @@ def save_config(config: Config) -> None:
             "chroma_path": config.chroma_path,
             "max_results": config.max_results,
             "api_key": config.api_key,
+            "local_model": config.local_model,
         }, f, indent=2)

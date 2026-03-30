@@ -48,3 +48,26 @@ def test_old_repo_path_key_is_ignored(tmp_path, monkeypatch):
     config = load_config()
     assert config.active_repo == ""
     assert config.repos == {}
+
+
+def test_config_local_model_defaults_to_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.config.CONFIG_PATH", tmp_path / "config.json")
+    config = load_config()
+    assert config.local_model == ""
+
+
+def test_config_local_model_loads_from_file(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"local_model": "qwen3-coder:30b"}))
+    monkeypatch.setattr("src.config.CONFIG_PATH", config_path)
+    config = load_config()
+    assert config.local_model == "qwen3-coder:30b"
+
+
+def test_config_local_model_persists_on_save(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.config.CONFIG_PATH", tmp_path / "config.json")
+    config = load_config()
+    config.local_model = "qwen3-coder:30b"
+    save_config(config)
+    reloaded = load_config()
+    assert reloaded.local_model == "qwen3-coder:30b"

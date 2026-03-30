@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from src.agent_loop import AgentLoop
 from src.plan_store import get_active_plan, list_plans, save_plan, delete_plan
 from src.planner import Planner, PlannerError
 from src.executor import Executor
+from src.reviewer import Reviewer, ReviewerError, ReviewResult
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
@@ -29,6 +31,7 @@ Commands:
   plan revise <feedback>      Revise the current pending plan
   plan clear                  Discard the current pending plan
   execute                     Execute the current pending plan
+  review [context]            Review current git diff; optional context about the changes
   plans                       List all plans for the active repo
   clear                       Clear conversation history
   help                        Show this help
@@ -211,6 +214,25 @@ def _print_plan_summary(plan) -> None:
     print("\nRun 'execute' to apply.")
 
 
+def _print_review(result: ReviewResult) -> None:
+    print(f"\n{DIVIDER}")
+    print("Code Review")
+    print(DIVIDER)
+    print(result.summary)
+    for category, label in [("critical", "CRITICAL"), ("important", "IMPORTANT"), ("suggestion", "SUGGESTIONS")]:
+        issues = [i for i in result.issues if i.category == category]
+        if not issues:
+            continue
+        print(f"\n{label}")
+        for issue in issues:
+            prefix = f"  \u2022 {issue.file} \u2014 " if issue.file else "  \u2022 "
+            print(f"{prefix}{issue.description}")
+            print(f"    \u2192 {issue.recommendation}")
+    if not result.issues:
+        print("\nNo issues found.")
+    print(DIVIDER)
+
+
 def run_plan(task: str, config, embedder, llm, store) -> None:
     if not config.active_repo or not store:
         print("No active repo. Type 'use <repo>' to select one.")
@@ -269,7 +291,47 @@ def run_plan_clear(config) -> None:
     print("Plan discarded.")
 
 
-def run_execute(config, llm) -> None:
+def run_review(context: str, config, embedder, llm, store) -> None:
+    if not config.active_repo or not store:
+        print("No active repo. Type 'use <repo>' to select one.")
+        return
+
+    repo_path = config.repos[config.active_repo]["path"]
+
+    proc = subprocess.run(
+        ["git", "diff", "HEAD"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print(f"Error running git diff: {proc.stderr}")
+        return
+
+    diff = proc.stdout
+
+    if not diff and not context:
+        print("No uncommitted changes to review.")
+        return
+
+    reviewer = Reviewer(llm=llm, embedder=embedder, store=store, repo_root=repo_path)
+    print("Reviewing...")
+    try:
+        review = reviewer.review(diff=diff, context=context)
+    except ReviewerError as e:
+        print(f"Error: {e}")
+        return
+
+    _print_review(review)
+
+    if review.issues:
+        choice = input("Generate a fix plan for the above issues? [y/n]: ").strip().lower()
+        if choice == "y":
+            fix_desc = f"Fix code review issues: {review.summary}"
+            run_plan(fix_desc, config, embedder, llm, store)
+
+
+def run_execute(config, llm, embedder, store) -> None:
     if not config.active_repo:
         print("No active repo. Type 'use <repo>' to select one.")
         return
@@ -282,7 +344,9 @@ def run_execute(config, llm) -> None:
         return
     repo_path = config.repos[config.active_repo]["path"]
     executor = Executor(llm=llm, repo_root=repo_path, plans_dir=PLANS_DIR)
-    executor.execute(active)
+    plan = executor.execute(active)
+    if plan.status == "completed":
+        run_review(active.task, config, embedder, llm, store)
 
 
 def run_plans_list(config) -> None:
@@ -377,9 +441,14 @@ def main():
             else:
                 run_plan(rest, config, embedder, llm, store)
         elif command == "execute":
-            run_execute(config, llm)
+            run_execute(config, llm, embedder, store)
         elif command == "plans":
             run_plans_list(config)
+        elif command == "review":
+            if not agent:
+                print("No active repo. Type 'use <repo>' to select one.")
+            else:
+                run_review(rest, config, embedder, llm, store)
         elif command == "ask":
             if not rest:
                 print("Usage: ask <question>")

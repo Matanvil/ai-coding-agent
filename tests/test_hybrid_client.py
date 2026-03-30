@@ -98,3 +98,20 @@ def test_hybrid_fires_fallback_event():
         on_event=lambda t, d: events.append((t, d)),
     )
     assert any(t == "model_fallback" for t, d in events)
+    fallback_events = [(t, d) for t, d in events if t == "model_fallback"]
+    assert len(fallback_events) == 1
+    assert fallback_events[0][1]["kind"] == "parse_error"
+
+
+def test_hybrid_falls_back_to_original_messages_when_partial_empty():
+    ollama = make_ollama(side_effect=ToolCallParseError("bad", partial=[]))
+    claude = make_claude(return_value="claude answer")
+    original_messages = [{"role": "user", "content": "q"}]
+    client = HybridClient(ollama=ollama, claude=claude)
+
+    client.respond(
+        messages=original_messages,
+        tool_handler=lambda name, inp: "",
+    )
+    call_messages = claude.respond.call_args.kwargs["messages"]
+    assert call_messages == original_messages

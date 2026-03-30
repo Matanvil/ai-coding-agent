@@ -38,7 +38,7 @@ class HybridClient(BaseLLMClient):
             )
         except ToolCallParseError as e:
             if on_event:
-                on_event("model_fallback", {"reason": str(e), "turns": len(e.partial)})
+                on_event("model_fallback", {"kind": "parse_error", "reason": str(e), "turns": len(e.partial)})
             return self.claude.respond(
                 messages=e.partial if e.partial else messages,
                 tool_handler=tool_handler,
@@ -47,7 +47,7 @@ class HybridClient(BaseLLMClient):
             )
         except Exception as e:
             if on_event:
-                on_event("model_fallback", {"reason": str(e), "turns": 0})
+                on_event("model_fallback", {"kind": "connection_error", "reason": str(e), "turns": 0})
             return self.claude.respond(
                 messages=messages,
                 tool_handler=tool_handler,

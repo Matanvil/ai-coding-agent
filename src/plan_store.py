@@ -22,6 +22,12 @@ class Plan:
     edits: List[FileEdit]
 
 
+@dataclass
+class ApprovalDecision:
+    action: str   # "apply" | "skip" | "quit" | "revise"
+    feedback: str = ""  # only used when action == "revise"
+
+
 def plan_filepath(plan: Plan, plans_dir: str) -> Path:
     """Return the filesystem path for this plan's JSON file."""
     safe_ts = plan.created_at.replace(":", "-").replace(" ", "_")

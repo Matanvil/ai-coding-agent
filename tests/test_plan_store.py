@@ -1,5 +1,5 @@
 import pytest
-from src.plan_store import FileEdit, Plan, save_plan, load_plan, list_plans, get_active_plan, delete_plan, plan_filepath
+from src.plan_store import FileEdit, Plan, save_plan, load_plan, list_plans, get_active_plan, delete_plan, plan_filepath, ApprovalDecision
 
 
 def _make_plan(task="add cache", repo="myrepo", created_at="2026-03-30 14:23", status="pending"):
@@ -63,3 +63,15 @@ def test_delete_plan_removes_file(tmp_path):
     assert path.exists()
     delete_plan(plan, str(tmp_path))
     assert not path.exists()
+
+
+def test_approval_decision_defaults():
+    d = ApprovalDecision("apply")
+    assert d.action == "apply"
+    assert d.feedback == ""
+
+
+def test_approval_decision_with_feedback():
+    d = ApprovalDecision("revise", "use 99 instead")
+    assert d.action == "revise"
+    assert d.feedback == "use 99 instead"

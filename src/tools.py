@@ -43,4 +43,6 @@ def read_file(path: str, repo_root: str) -> str:
         raise ValueError("Path must be within the indexed repo root")
     if not abs_path.exists():
         raise FileNotFoundError(f"File not found: {path}")
+    if abs_path.is_dir():
+        raise ValueError(f"Path is a directory, not a file: {path}")
     return abs_path.read_text(encoding="utf-8", errors="ignore")

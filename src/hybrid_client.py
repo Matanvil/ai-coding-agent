@@ -14,6 +14,16 @@ class HybridClient(BaseLLMClient):
         self.claude = claude
         self.force_claude: bool = False
 
+    @property
+    def client(self):
+        """Expose the underlying Anthropic client for callers that bypass respond()."""
+        return self.claude.client
+
+    @property
+    def model(self) -> str:
+        """Expose the Claude model name for callers that bypass respond()."""
+        return self.claude.model
+
     def respond(
         self,
         messages: List[Dict[str, Any]],

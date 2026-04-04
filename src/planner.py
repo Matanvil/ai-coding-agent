@@ -70,6 +70,12 @@ class PlannerError(Exception):
     pass
 
 
+class _PlanSubmitted(Exception):
+    """Sentinel raised by the tool handler when submit_plan is called."""
+    def __init__(self, plan: Plan):
+        self.plan = plan
+
+
 class Planner:
     def __init__(self, llm, embedder, store, repo_root: str, max_iterations: int = 15):
         self.llm = llm
@@ -90,61 +96,39 @@ class Planner:
         return f"Unknown tool: {tool_name}"
 
     def _run(self, messages: list, task: str, on_event=None) -> Plan:
-        """Run the planner ReAct loop. Returns Plan when submit_plan is called."""
-        current_messages = list(messages)
+        """Run the planner ReAct loop using llm.respond(). Returns Plan when submit_plan is called."""
+        def combined_handler(tool_name: str, tool_input: dict) -> str:
+            if tool_name == "submit_plan":
+                plan = Plan(
+                    task=task,
+                    repo="",  # set by caller
+                    created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    status="pending",
+                    edits=[
+                        FileEdit(
+                            file=e["file"],
+                            description=e["description"],
+                            old_code=e["old_code"],
+                            new_code=e["new_code"],
+                            status="pending",
+                        )
+                        for e in tool_input["edits"]
+                    ],
+                )
+                raise _PlanSubmitted(plan)
+            return self._tool_handler(tool_name, tool_input)
 
-        for _ in range(self.max_iterations):
-            response = self.llm.client.messages.create(
-                model=self.llm.model,
-                max_tokens=4096,
+        try:
+            self.llm.respond(
+                messages=messages,
+                tool_handler=combined_handler,
+                on_event=on_event,
+                max_iterations=self.max_iterations,
                 system=PLANNER_SYSTEM_PROMPT,
                 tools=PLANNER_TOOL_DEFINITIONS,
-                messages=current_messages,
             )
-
-            if response.stop_reason == "tool_use":
-                current_messages.append({"role": "assistant", "content": response.content})
-
-                tool_results = []
-                plan_to_return = None
-                for block in response.content:
-                    if block.type != "tool_use":
-                        continue
-                    if block.name == "submit_plan":
-                        plan_to_return = Plan(
-                            task=task,
-                            repo="",  # set by caller
-                            created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-                            status="pending",
-                            edits=[
-                                FileEdit(
-                                    file=e["file"],
-                                    description=e["description"],
-                                    old_code=e["old_code"],
-                                    new_code=e["new_code"],
-                                    status="pending",
-                                )
-                                for e in block.input["edits"]
-                            ],
-                        )
-                    else:
-                        if on_event:
-                            on_event("tool_call", {"tool": block.name, "input": block.input})
-                        result = self._tool_handler(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
-
-                if tool_results:
-                    current_messages.append({"role": "user", "content": tool_results})
-
-                if plan_to_return is not None:
-                    return plan_to_return
-
-            else:
-                break
+        except _PlanSubmitted as e:
+            return e.plan
 
         raise PlannerError("Planner could not produce a plan. Try a more specific task.")
 

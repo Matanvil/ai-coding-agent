@@ -122,6 +122,12 @@ class ReviewerError(Exception):
     pass
 
 
+class _ReviewSubmitted(Exception):
+    """Sentinel raised by the tool handler when submit_review is called."""
+    def __init__(self, result: ReviewResult):
+        self.result = result
+
+
 class Reviewer:
     def __init__(self, llm, embedder, store, repo_root: str, max_iterations: int = 15):
         self.llm = llm
@@ -142,72 +148,50 @@ class Reviewer:
         return f"Unknown tool: {tool_name}"
 
     def review(self, diff: str, context: str, on_event=None) -> ReviewResult:
-        """Run the reviewer ReAct loop. Returns ReviewResult when submit_review is called."""
+        """Run the reviewer ReAct loop using llm.respond(). Returns ReviewResult when submit_review is called."""
         if on_event:
             on_event("review_started", {})
         message = f"Git diff:\n{diff}\n\nContext: {context}\n\nReview the changes above."
         messages = [{"role": "user", "content": message}]
 
-        for _ in range(self.max_iterations):
-            response = self.llm.client.messages.create(
-                model=self.llm.model,
-                max_tokens=4096,
+        def combined_handler(tool_name: str, tool_input: dict) -> str:
+            if tool_name == "submit_review":
+                data = tool_input
+                result = ReviewResult(
+                    summary=data["summary"],
+                    issues=[
+                        ReviewIssue(
+                            category=i["category"],
+                            description=i["description"],
+                            file=i.get("file", ""),
+                            recommendation=i["recommendation"],
+                        )
+                        for i in data.get("issues", [])
+                    ],
+                    suggest_fix_plan=data.get("suggest_fix_plan", False),
+                )
+                raise _ReviewSubmitted(result)
+            if on_event:
+                on_event("tool_call", {"tool": tool_name, "input": tool_input})
+            return self._tool_handler(tool_name, tool_input)
+
+        try:
+            self.llm.respond(
+                messages=messages,
+                tool_handler=combined_handler,
+                on_event=on_event,
+                max_iterations=self.max_iterations,
                 system=REVIEWER_SYSTEM_PROMPT,
                 tools=REVIEWER_TOOL_DEFINITIONS,
-                messages=messages,
             )
-
-            if response.stop_reason == "tool_use":
-                messages.append({"role": "assistant", "content": response.content})
-                tool_results = []
-                review_result = None
-
-                for block in response.content:
-                    if block.type != "tool_use":
-                        continue
-                    # submit_review terminates the loop. Any preceding tool results
-                    # in this same response batch are appended to messages (below),
-                    # but since we return immediately after, the messages list is
-                    # discarded. This is intentional — do not "fix" by skipping the
-                    # tool_results append.
-                    if block.name == "submit_review":
-                        data = block.input
-                        review_result = ReviewResult(
-                            summary=data["summary"],
-                            issues=[
-                                ReviewIssue(
-                                    category=i["category"],
-                                    description=i["description"],
-                                    file=i.get("file", ""),
-                                    recommendation=i["recommendation"],
-                                )
-                                for i in data.get("issues", [])
-                            ],
-                            suggest_fix_plan=data.get("suggest_fix_plan", False),
-                        )
-                    else:
-                        if on_event:
-                            on_event("tool_call", {"tool": block.name, "input": block.input})
-                        result = self._tool_handler(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
-
-                if tool_results:
-                    messages.append({"role": "user", "content": tool_results})
-
-                if review_result is not None:
-                    if on_event:
-                        critical_count = sum(1 for i in review_result.issues if i.category == "critical")
-                        on_event("review_complete", {
-                            "issue_count": len(review_result.issues),
-                            "critical_count": critical_count,
-                            "suggest_fix_plan": review_result.suggest_fix_plan,
-                        })
-                    return review_result
-            else:
-                break
+        except _ReviewSubmitted as e:
+            if on_event:
+                critical_count = sum(1 for i in e.result.issues if i.category == "critical")
+                on_event("review_complete", {
+                    "issue_count": len(e.result.issues),
+                    "critical_count": critical_count,
+                    "suggest_fix_plan": e.result.suggest_fix_plan,
+                })
+            return e.result
 
         raise ReviewerError("Reviewer could not produce a review. Try providing more context.")

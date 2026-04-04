@@ -74,6 +74,8 @@ class BaseLLMClient(ABC):
         tool_handler: Callable[[str, Dict], str],
         on_event: Optional[Callable[[str, Dict], None]] = None,
         max_iterations: int = 10,
+        system: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> str:
         ...
 
@@ -89,16 +91,20 @@ class ClaudeClient(BaseLLMClient):
         tool_handler: Callable[[str, Dict], str],
         on_event: Optional[Callable[[str, Dict], None]] = None,
         max_iterations: int = 10,
+        system: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> str:
         """Run the ReAct loop until a final answer is produced."""
         current_messages = list(messages)
+        active_system = system if system is not None else SYSTEM_PROMPT
+        active_tools = tools if tools is not None else TOOL_DEFINITIONS
 
         for _ in range(max_iterations):
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                tools=TOOL_DEFINITIONS,
+                system=active_system,
+                tools=active_tools,
                 messages=current_messages,
             )
 

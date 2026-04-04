@@ -30,37 +30,29 @@ class HybridClient(BaseLLMClient):
         tool_handler: Callable[[str, Dict], str],
         on_event: Optional[Callable[[str, Dict], None]] = None,
         max_iterations: int = 10,
+        system: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> str:
+        kwargs = dict(
+            messages=messages,
+            tool_handler=tool_handler,
+            on_event=on_event,
+            max_iterations=max_iterations,
+            system=system,
+            tools=tools,
+        )
         if self.force_claude:
-            return self.claude.respond(
-                messages=messages,
-                tool_handler=tool_handler,
-                on_event=on_event,
-                max_iterations=max_iterations,
-            )
+            return self.claude.respond(**kwargs)
 
         try:
-            return self.ollama.respond(
-                messages=messages,
-                tool_handler=tool_handler,
-                on_event=on_event,
-                max_iterations=max_iterations,
-            )
+            return self.ollama.respond(**kwargs)
         except ToolCallParseError as e:
             if on_event:
                 on_event("model_fallback", {"kind": "parse_error", "reason": str(e), "turns": len(e.partial)})
             return self.claude.respond(
-                messages=e.partial if e.partial else messages,
-                tool_handler=tool_handler,
-                on_event=on_event,
-                max_iterations=max_iterations,
+                **{**kwargs, "messages": e.partial if e.partial else messages}
             )
         except Exception as e:
             if on_event:
                 on_event("model_fallback", {"kind": "connection_error", "reason": str(e), "turns": 0})
-            return self.claude.respond(
-                messages=messages,
-                tool_handler=tool_handler,
-                on_event=on_event,
-                max_iterations=max_iterations,
-            )
+            return self.claude.respond(**kwargs)

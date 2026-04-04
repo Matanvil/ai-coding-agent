@@ -98,8 +98,12 @@ class OllamaClient(BaseLLMClient):
         tool_handler: Callable[[str, Dict], str],
         on_event: Optional[Callable[[str, Dict], None]] = None,
         max_iterations: int = 10,
+        system: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> str:
         current_messages = list(messages)
+        active_system = system if system is not None else SYSTEM_PROMPT
+        active_tools = _to_openai_tools(tools) if tools is not None else self._openai_tools
 
         for _ in range(max_iterations):
             try:
@@ -107,8 +111,8 @@ class OllamaClient(BaseLLMClient):
                     f"{self.base_url}/v1/chat/completions",
                     json={
                         "model": self.model,
-                        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + _to_ollama_messages(current_messages),
-                        "tools": self._openai_tools,
+                        "messages": [{"role": "system", "content": active_system}] + _to_ollama_messages(current_messages),
+                        "tools": active_tools,
                     },
                     timeout=120,
                 )
